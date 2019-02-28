@@ -35,7 +35,7 @@ public class MigrationOptions
     @Option( name = "-t", aliases = { "--data-type" }, usage = "Data type ('json' or 'object')" )
     private DataType dataType;
 
-    @Argument( index = 0, metaVar = "action", required = false, usage = "Migration command to execute ('dump' or 'load')")
+    @Argument( index = 0, metaVar = "action", required = false, usage = "Migration command to execute ('dump', 'load' or 'export')")
     private MigrationCommand migrationCommand;
 
     @Argument( index = 1, metaVar = "cache-name", required = false, usage = "Name of cache to migrate")

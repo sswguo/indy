@@ -133,11 +133,11 @@ public final class StoreKey
     public static StoreKey fromString( final String id )
     {
         Logger logger = LoggerFactory.getLogger( StoreKey.class );
-        logger.debug( "Parsing raw string: '{}' to StoreKey", id );
+        //logger.debug( "Parsing raw string: '{}' to StoreKey", id );
 
         String[] parts = id.split(":");
 
-        logger.debug( "Got {} parts: {}", parts.length, Arrays.asList( parts ) );
+        //logger.debug( "Got {} parts: {}", parts.length, Arrays.asList( parts ) );
 
         String packageType = null;
         String name;

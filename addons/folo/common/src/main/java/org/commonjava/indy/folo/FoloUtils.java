@@ -16,6 +16,8 @@
 package org.commonjava.indy.folo;
 
 import org.commonjava.indy.folo.model.TrackedContent;
+import org.commonjava.indy.folo.model.TrackingKey;
+import org.commonjava.indy.subsys.infinispan.CacheHandle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -59,6 +61,39 @@ public class FoloUtils
             }
         }
     }
+    public static void zipTrackedContent( File out, Set<TrackingKey> sealed, CacheHandle<Object, Object> cache ) throws IOException
+    {
+        logger.info( "Writing sealed zip to: '{}'", out.getAbsolutePath() );
+
+        try (ZipOutputStream zip = new ZipOutputStream( new FileOutputStream( out ) ))
+        {
+
+            for ( TrackingKey key : sealed )
+            {
+
+                cache.executeCache( (c) -> {
+                    try
+                    {
+                        System.out.println( "Writing:" + key.getId() );
+                        TrackedContent f = (TrackedContent) c.get( key );
+
+                        String name = SEALED.getValue() + "/" + f.getKey().getId();
+
+                        logger.trace( "Adding {} to zip", name );
+                        zip.putNextEntry( new ZipEntry( name ) );
+                        copy( toInputStream( f ), zip );
+                        c.remove( key );
+                    }
+                    catch ( IOException e )
+                    {
+                        e.printStackTrace();
+                    }
+                    return true;
+                } );
+
+            }
+        }
+    }
 
     public static void backupTrackedContent( File dir, Set<TrackedContent> sealed ) throws IOException
     {
@@ -86,7 +121,7 @@ public class FoloUtils
             ZipEntry entry;
             while((entry = stream.getNextEntry())!=null)
             {
-                logger.trace( "Read entry: %s, len: %d", entry.getName(), entry.getSize() );
+                //logger.trace( "Read entry: %s, len: %d", entry.getName(), entry.getSize() );
                 ByteArrayOutputStream bos = new ByteArrayOutputStream();
                 int len;
                 byte[] buffer = new byte[1024];
@@ -94,11 +129,26 @@ public class FoloUtils
                 {
                     bos.write(buffer, 0, len);
                 }
-                bos.close();
 
-                ObjectInputStream ois = new ObjectInputStream( new ByteArrayInputStream( bos.toByteArray() ));
-                TrackedContent record = (TrackedContent) ois.readObject();
-                consumer.accept( record );
+                //try()
+                //{
+                    ObjectInputStream ois = new ObjectInputStream( new ByteArrayInputStream( bos.toByteArray() ));
+                    TrackedContent record = (TrackedContent) ois.readObject();
+
+                    bos = null;
+                    //bos.close();
+                    ois.close();
+                    consumer.accept( record );
+                    //record = null;
+                //}
+                //catch ( IOException e )
+                //{
+                //    e.printStackTrace();
+                //}
+
+
+
+
                 count++;
             }
         }

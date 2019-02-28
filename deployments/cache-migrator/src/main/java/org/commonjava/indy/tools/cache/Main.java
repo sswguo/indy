@@ -15,15 +15,20 @@
  */
 package org.commonjava.indy.tools.cache;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import org.apache.commons.io.FileUtils;
+import org.commonjava.indy.IndyWorkflowException;
 import org.commonjava.indy.action.IndyLifecycleException;
 import org.commonjava.indy.boot.IndyBootException;
+import org.commonjava.indy.folo.data.FoloFiler;
 import org.commonjava.indy.folo.model.TrackedContent;
 import org.commonjava.indy.folo.model.TrackingKey;
 import org.commonjava.indy.model.core.io.IndyObjectMapper;
 import org.commonjava.indy.subsys.infinispan.CacheHandle;
+import org.eclipse.jgit.errors.LargeObjectException;
+import org.infinispan.commons.api.BasicCache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,19 +36,30 @@ import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.lang.reflect.InvocationTargetException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Properties;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
 import static org.commonjava.indy.boot.BootInterface.ERR_CANT_INIT_BOOTER;
 import static org.commonjava.indy.boot.BootInterface.ERR_CANT_PARSE_ARGS;
+import static org.commonjava.indy.folo.FoloUtils.zipTrackedContent;
 
 public class Main
 {
@@ -132,6 +148,10 @@ public class Main
             objectMapper.disable( SerializationFeature.INDENT_OUTPUT );
 
             CacheHandle<Object, Object> cache = producer.getCache( options.getCacheName() );
+
+            //checkMissingRecords ( cache );
+            //loadFromBakDir( cache );
+
             if ( MigrationCommand.dump == options.getMigrationCommand() )
             {
 
@@ -144,6 +164,10 @@ public class Main
                     dumpObjectFile( cache, options );
                 }
 
+            }
+            else if ( MigrationCommand.export == options.getMigrationCommand() )
+            {
+                exportReport( cache, options );
             }
             else
             {
@@ -182,6 +206,120 @@ public class Main
         return 0;
     }
 
+    /**
+     *
+     * @param cache
+     * @param options
+     * @throws IndyBootException
+     */
+    private void exportReport( CacheHandle<Object, Object> cache, MigrationOptions options ) throws IndyBootException
+    {
+        Set<TrackingKey> sealed = new HashSet<>(  );
+        cache.executeCache( (c) -> {
+            c.forEach( (k, v) -> {
+                sealed.add( (TrackingKey) k );
+            } );
+            return true;
+        } );
+
+        System.out.println( sealed.size() );
+
+        try
+        {
+            File file = options.getDataFile();
+            if ( file.exists() )
+            {
+                file.delete();
+            }
+            file.getParentFile().mkdirs(); // make dirs if not exist
+
+            zipTrackedContent( file, sealed, cache );
+        }
+        catch ( IOException e )
+        {
+            throw new IndyBootException( " Failed to export sealed report. ", e );
+        }
+    }
+
+    private void checkMissingRecords( CacheHandle<Object, Object> cache )
+    {
+        //String csvFile = "/Users/wguo/Documents/Indy/folo_debug/missing-records.csv";
+        //String csvFile = "/Users/wguo/Documents/Indy/folo_debug/missing-tracking-reports-even-in-bak.csv";
+        String csvFile = "/Users/wguo/Documents/Indy/folo_debug/missing-tracking-reports-1.csv";
+
+        cache.executeCache( c -> {
+            try ( BufferedReader br = new BufferedReader(new FileReader( csvFile)) )
+            {
+                int count = 0;
+                String line = "";
+                int missing = 0;
+                while ((line = br.readLine()) != null) {
+                    count ++;
+                    String[] item = line.split(",");
+
+                    //System.out.println("tracking key: " + item[1]);
+
+                    if ( c.get( new TrackingKey( item[1] ) ) != null )
+                    {
+
+                    }
+                    else
+                    {
+                        System.out.println(item[0] + "," + item[1]);
+                        missing++;
+                    }
+
+                }
+                System.out.println( "Checking total: " + count + "| missing:" + missing );
+            } catch (FileNotFoundException e) {
+                e.printStackTrace();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+                return true;
+            } );
+
+    }
+
+    private void loadFromBakDir( CacheHandle<Object, Object> cache )
+    {
+        try
+        {
+            String bak_dir = "/Users/wguo/stage/indy/var/lib/indy/data/folo/bak/sealed";
+            List<File> filesInFolder = Files.walk( Paths.get( bak_dir ) )
+                                            .filter( Files::isRegularFile )
+                                            .map( Path::toFile )
+                                            .collect( Collectors.toList() );
+            logger.info( " Files: {} ", filesInFolder.size() );
+
+            filesInFolder.stream().forEach( file -> {
+                try( ObjectInputStream in = new ObjectInputStream( new FileInputStream( file ) ) )
+                {
+                    System.out.println( "File: " + file.getName() );
+                    Object k = new TrackingKey( file.getName() );
+                    Object v = in.readObject();
+                    cache.executeCache( (c) -> {
+                        c.putAsync( k, v );
+                        return true;
+                    } );
+                }
+                catch ( IOException e )
+                {
+                    e.printStackTrace();
+                }
+                catch ( ClassNotFoundException e )
+                {
+                    e.printStackTrace();
+                }
+            } );
+
+        }
+        catch ( IOException e )
+        {
+            logger.error( "Read file error.", e );
+        }
+    }
+
     private void loadFromJsonFile( CacheHandle<Object, Object> cache, MigrationOptions options ) throws IndyBootException
     {
         AtomicReference<Throwable> error = new AtomicReference<>();
@@ -193,14 +331,23 @@ public class Main
                 {
                     String key;
                     int count = 0;
+                    int existing = 0;
                     while ( (key = in.readLine()) != null )
                     {
                         try
                         {
                             Object k = objectMapper.readValue( key, TrackingKey.class );
                             Object v = objectMapper.readValue( in.readLine(), TrackedContent.class );
-
-                            c.putAsync( k, v );
+                            if ( c.get( k ) == null )
+                            {
+                                c.putAsync( k, v );
+                            }
+                            else
+                            {
+                                System.out.println( ( (TrackingKey) k ).getId() );
+                                existing++;
+                                c.remove( k, v );
+                            }
                             count++;
                         }
                         catch ( Exception e )
@@ -210,6 +357,8 @@ public class Main
                         }
                     }
                     logger.info( "Load entries: {}", count );
+                    logger.info( "Existing entries: {}", existing );
+                    logger.info( "New entries: {}", c.size());
                 }
                 catch ( Exception e )
                 {
@@ -279,6 +428,7 @@ public class Main
 
     private void dumpObjectFile( CacheHandle<Object, Object> cache, MigrationOptions options ) throws IndyBootException
     {
+
         AtomicReference<Throwable> error = new AtomicReference<>();
         try (ObjectOutputStream out = new ObjectOutputStream( new GZIPOutputStream( new FileOutputStream( options.getDataFile() ) )))
         {
