@@ -945,6 +945,20 @@
         <artifactId>jgroups</artifactId>
         <version>${jgroupsVersion}</version>
       </dependency>
+      <dependency>
+        <groupId>org.commonjava.indy</groupId>
+        <artifactId>indy-event-audit-common</artifactId>
+        <version>1.7.4-SNAPSHOT</version>
+      </dependency>
+      <dependency>
+        <groupId>org.commonjava.indy</groupId>
+        <artifactId>indy-event-audit-common</artifactId>
+        <version>1.7.4-SNAPSHOT</version>
+        <classifier>confset</classifier>
+        <type>tar.gz</type>
+        <scope>provided</scope>
+      </dependency>
+
       <!-- DO NOT REMOVE: append::depMgmt -->
 
 
